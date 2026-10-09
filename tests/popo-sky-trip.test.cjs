@@ -67,11 +67,11 @@ function loadGame(width = 390) {
   };
   vm.runInNewContext(script.replace(/\}\)\(\);\s*$/, `
     globalThis.game = {
-      startStage, beginBoss, update, draw, drawPlayerHearts, drawRobot, drawUfo,
+      startStage, startEndlessMode, beginBoss, finishStage, awardEndlessPoints, update, draw, drawHud, drawPlayerHearts, drawRobot, drawUfo,
       damagePlayer, actInLane, toggleSound,
       state: () => ({
-        boss, lives, playerX, playerY, bossShotTimer, waterShotTimer, mode, soundEnabled,
-        enemyShotCount: enemyShots.length
+        boss, lives, playerX, playerY, bossShotTimer, waterShotTimer, mode, stage, soundEnabled,
+        enemyShotCount: enemyShots.length, endlessMode, endlessScore, speedTicks, speedMultiplier
       }),
       fireAt: (lane) => shots.push({ lane, y: boss.y + 1, speed: 0 }),
       setBossTimers: (shot, water) => { bossShotTimer = shot; waterShotTimer = water; },
@@ -226,4 +226,66 @@ test("robot stops firing during its weak-point opening and shows a sweat icon", 
   calls.length = 0;
   game.drawRobot();
   assert.ok(calls.some(c => c.name === "fillText" && c.args[0] === "💦"));
+});
+
+test("endless mode awards enemy and boss points, heals, and repeats both stages", () => {
+  const { game } = loadGame();
+  game.startEndlessMode();
+  assert.equal(game.state().endlessMode, true);
+  game.startStage(1, 4);
+  game.awardEndlessPoints(1);
+  assert.equal(game.state().endlessScore, 1);
+  assert.equal(game.state().lives, 5);
+  game.finishStage();
+  assert.equal(game.state().endlessScore, 6);
+  assert.equal(game.state().lives, 6);
+  game.update(2.3);
+  assert.equal(game.state().stage, 2);
+  assert.equal(game.state().endlessScore, 6);
+
+  game.finishStage();
+  assert.equal(game.state().endlessScore, 16);
+  assert.equal(game.state().lives, 6);
+  game.update(2.3);
+  assert.equal(game.state().stage, 1);
+  game.awardEndlessPoints(1);
+  assert.equal(game.state().endlessScore, 17);
+  assert.equal(game.state().lives, 6);
+});
+
+test("endless speed rises by 0.05 to 5x, then resets without resetting score", () => {
+  const { game } = loadGame();
+  game.startEndlessMode();
+  game.awardEndlessPoints(79);
+  assert.equal(game.state().speedMultiplier(), 4.95);
+  game.awardEndlessPoints(1);
+  assert.equal(game.state().speedMultiplier(), 5);
+  assert.equal(game.state().endlessScore, 80);
+  game.awardEndlessPoints(1);
+  assert.equal(game.state().speedMultiplier(), 1);
+  assert.equal(game.state().endlessScore, 81);
+  game.startStage(1, 6);
+  game.awardEndlessPoints(1);
+  assert.equal(game.state().speedMultiplier(), 1.05);
+});
+
+test("endless speed multiplier advances gameplay simulation", () => {
+  const { game } = loadGame();
+  game.startEndlessMode();
+  game.startStage(1, 6);
+  game.awardEndlessPoints(20);
+  game.beginBoss();
+  game.setBossTimers(10, 10);
+  game.update(0.1);
+  assert.equal(game.state().bossShotTimer, 10 - 0.2);
+});
+
+test("endless HUD displays current score and speed multiplier", () => {
+  const { game, calls } = loadGame();
+  game.startEndlessMode();
+  game.awardEndlessPoints(7);
+  calls.length = 0;
+  game.drawHud();
+  const labels = calls.filter(c => c.name === "fillText").map(c => c.args[0]);
+  assert.ok(labels.includes("⭐ 7　⚡ 1.35倍"));
 });

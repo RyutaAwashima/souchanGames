@@ -103,6 +103,17 @@
 
     button:active { transform: translateY(4px); box-shadow: 0 2px 0 #d9962d; }
     button:focus-visible { outline: 4px solid #b9f5ff; outline-offset: 5px; }
+    .card .secondary-button {
+      min-height: 52px;
+      margin: 18px 0 0 8px;
+      padding: 10px 18px;
+      border-width: 2px;
+      background: #b9f5ff;
+      box-shadow: 0 4px 0 #65b5cf;
+      font-size: 1.05rem;
+    }
+    .card .secondary-button:active { box-shadow: 0 2px 0 #65b5cf; }
+    .card .secondary-button[hidden] { display: none; }
 
     .message {
       position: absolute;
@@ -183,6 +194,7 @@
         <h1 id="overlay-title">ポポのそらたび</h1>
         <p id="overlay-text">タップでレーンをえらんで<br>そのまま星パンチ！</p>
         <button id="overlay-button" type="button">あそぶ</button>
+        <button class="secondary-button" id="overlay-secondary-button" type="button" hidden></button>
       </div>
     </section>
   </main>
@@ -196,6 +208,7 @@
       const overlayTitle = document.getElementById("overlay-title");
       const overlayText = document.getElementById("overlay-text");
       const overlayButton = document.getElementById("overlay-button");
+      const overlaySecondaryButton = document.getElementById("overlay-secondary-button");
       const message = document.getElementById("message");
       const soundToggle = document.getElementById("sound-toggle");
       const TAU = Math.PI * 2;
@@ -235,6 +248,11 @@
       let musicTimer = null;
       let musicStep = 0;
       let soundEnabled = true;
+      let endlessMode = false;
+      let endlessScore = 0;
+      let speedTicks = 0;
+
+      const speedMultiplier = () => 1 + speedTicks * 0.05;
 
       const melody = [659, 784, 988, 784, 880, 784, 659, 523, 587, 659, 784, 659, 587, 523, 587, 659];
 
@@ -332,11 +350,16 @@
         playerY = currentPlayerY();
       }
 
-      function showOverlay(title, text, buttonText, action) {
+      function showOverlay(title, text, buttonText, action, secondaryText = "", secondaryAction = null) {
         overlayTitle.textContent = title;
         overlayText.textContent = text;
         overlayButton.textContent = buttonText;
         overlayButton.onclick = action;
+        overlaySecondaryButton.hidden = !secondaryAction;
+        if (secondaryAction) {
+          overlaySecondaryButton.textContent = secondaryText;
+          overlaySecondaryButton.onclick = secondaryAction;
+        }
         overlay.hidden = false;
       }
 
@@ -375,7 +398,28 @@
       }
 
       function startNewGame() {
+        endlessMode = false;
+        endlessScore = 0;
+        speedTicks = 0;
         startStage(1, 6);
+      }
+
+      function startEndlessMode() {
+        endlessMode = true;
+        endlessScore = 0;
+        speedTicks = 0;
+        startStage(1, 6);
+        showMessage("エンドレス！　たおしてハートをあつめよう！", 2.5);
+      }
+
+      function awardEndlessPoints(points) {
+        if (!endlessMode) return;
+        endlessScore += points;
+        lives = Math.min(6, lives + 1);
+        for (let i = 0; i < points; i++) {
+          if (speedTicks === 80) speedTicks = 0;
+          else speedTicks += 1;
+        }
       }
 
       function laneFromPointer(event) {
@@ -450,11 +494,16 @@
         if (lives <= 0) {
           mode = "gameover";
           stopMusic();
+          const retryAction = endlessMode
+            ? startEndlessMode
+            : () => startStage(stage, 6);
           showOverlay(
             "もういっかい！",
-            `ステージ${stage}の はじめから もういちど あそべるよ。`,
-            "つづける",
-            () => startStage(stage, 6)
+            endlessMode
+              ? `スコア ${endlessScore}！　もういちど エンドレスに ちょうせん！`
+              : `ステージ${stage}の はじめから もういちど あそべるよ。`,
+            endlessMode ? "もういちど" : "つづける",
+            retryAction
           );
           return;
         }
@@ -534,6 +583,7 @@
 
       function finishStage() {
         playEffect("clear");
+        if (endlessMode) awardEndlessPoints(stage === 1 ? 5 : 10);
         if (stage === 1) {
           mode = "transition";
           transitionTimer = 2.3;
@@ -542,6 +592,14 @@
           enemyShots = [];
           shots = [];
           showMessage("やったー！　つぎのステージへ！", 2.3);
+        } else if (endlessMode) {
+          mode = "transition";
+          transitionTimer = 2.3;
+          boss = null;
+          enemies = [];
+          enemyShots = [];
+          shots = [];
+          showMessage(`ロボット撃破！ スコア ${endlessScore}！`, 2.3);
         } else {
           mode = "clear";
           stopMusic();
@@ -550,7 +608,9 @@
             "やったね！",
             "ポポといっしょに そらのへいわをまもったよ！",
             "もういちどあそぶ",
-            startNewGame
+            startNewGame,
+            "エンドレスへ",
+            startEndlessMode
           );
         }
       }
@@ -565,19 +625,20 @@
           if (toastTimer <= 0) message.hidden = true;
         }
         if (mode !== "playing" && mode !== "stun" && mode !== "transition") return;
-        elapsed += dt;
-        playerX += (laneX(lane) - playerX) * Math.min(1, dt * 12);
+        const gameDt = dt * (endlessMode ? speedMultiplier() : 1);
+        elapsed += gameDt;
+        playerX += (laneX(lane) - playerX) * Math.min(1, gameDt * 12);
         playerY = currentPlayerY();
-        invulnerable = Math.max(0, invulnerable - dt);
-        shotCooldown = Math.max(0, shotCooldown - dt);
+        invulnerable = Math.max(0, invulnerable - gameDt);
+        shotCooldown = Math.max(0, shotCooldown - gameDt);
 
         if (mode === "transition") {
-          transitionTimer -= dt;
-          if (transitionTimer <= 0) startStage(2, lives);
+          transitionTimer -= gameDt;
+          if (transitionTimer <= 0) startStage(endlessMode && stage === 2 ? 1 : 2, lives);
           return;
         }
         if (mode === "stun") {
-          stunTime -= dt;
+          stunTime -= gameDt;
           if (stunTime <= 0) {
             mode = "playing";
             showMessage("ピピのバッジで げんきいっぱい！", 1.5);
@@ -586,7 +647,7 @@
         }
 
         if (!boss) {
-          spawnTimer -= dt;
+          spawnTimer -= gameDt;
           if (spawnTimer <= 0 && kills < targetKills()) {
             spawnEnemy(Math.floor(Math.random() * 3));
             if (stage === 2 && kills < targetKills() - 2 && Math.random() < 0.35) {
@@ -598,12 +659,12 @@
         }
 
         if (boss) {
-          boss.blink = Math.max(0, boss.blink - dt);
+          boss.blink = Math.max(0, boss.blink - gameDt);
           if (boss.kind === "ufo") {
-            boss.pauseTimer -= dt;
+            boss.pauseTimer -= gameDt;
             if (boss.pauseState === "moving") {
               const distance = boss.targetLane - boss.lane;
-              boss.lane += Math.sign(distance) * Math.min(Math.abs(distance), dt * 1.2);
+              boss.lane += Math.sign(distance) * Math.min(Math.abs(distance), gameDt * 1.2);
               if (boss.pauseTimer <= 0) {
                 boss.pauseState = "warning";
                 boss.pauseTimer = 0.7;
@@ -621,8 +682,8 @@
           const ufoResting = boss.kind === "ufo" && boss.pauseState === "resting";
           const robotExposingCore = boss.kind === "robot" && boss.phase === "core";
           if (!ufoResting && !robotExposingCore) {
-            bossShotTimer -= dt;
-            waterShotTimer -= dt;
+            bossShotTimer -= gameDt;
+            waterShotTimer -= gameDt;
             if (bossShotTimer <= 0) {
               shootBoss();
               bossShotTimer = (stage === 1 ? 0.9 : 1.15) * 1.3;
@@ -633,7 +694,7 @@
             }
           }
           if (boss.kind === "robot" && boss.phase === "core") {
-            boss.phaseTimer -= dt;
+            boss.phaseTimer -= gameDt;
             if (boss.phaseTimer <= 0) {
               boss.phase = "arms";
               boss.armHp = [2, 2];
@@ -644,8 +705,8 @@
         }
 
         for (const enemy of enemies) {
-          enemy.y += enemy.speed * dt;
-          enemy.fireTimer -= dt;
+          enemy.y += enemy.speed * gameDt;
+          enemy.fireTimer -= gameDt;
           if (enemy.fireTimer <= 0) {
             enemyShots.push({
               lane: enemy.lane,
@@ -659,7 +720,7 @@
 
         for (let i = shots.length - 1; i >= 0; i--) {
           const shot = shots[i];
-          shot.y -= shot.speed * dt;
+          shot.y -= shot.speed * gameDt;
           if (boss && shot.y <= boss.y + height * 0.12) {
             if (boss.kind === "ufo") {
               if (Math.abs(laneX(shot.lane) - laneX(boss.lane)) <= Math.min(width * 0.14, 64) + 8) {
@@ -681,6 +742,7 @@
             if (shot.lane === enemy.lane && Math.abs(shot.y - enemy.y) < 24) {
               burst(laneX(enemy.lane), enemy.y, "#a9fff0");
               playEffect("pop");
+              awardEndlessPoints(1);
               enemies.splice(j, 1);
               kills += 1;
               hit = true;
@@ -692,7 +754,7 @@
 
         for (let i = enemyShots.length - 1; i >= 0; i--) {
           const bullet = enemyShots[i];
-          bullet.y += bullet.speed * dt;
+          bullet.y += bullet.speed * gameDt;
           if (bullet.lane === lane && Math.abs(bullet.y - playerY) < 26) {
             enemyShots.splice(i, 1);
             damagePlayer(bullet.kind === "bubble");
@@ -707,9 +769,9 @@
 
         for (let i = particles.length - 1; i >= 0; i--) {
           const particle = particles[i];
-          particle.life -= dt;
-          particle.x += particle.vx * dt;
-          particle.y += particle.vy * dt;
+          particle.life -= gameDt;
+          particle.x += particle.vx * gameDt;
+          particle.y += particle.vy * gameDt;
           if (particle.life <= 0) particles.splice(i, 1);
         }
       }
@@ -784,10 +846,20 @@
         ctx.font = "800 19px sans-serif";
         ctx.fillText(`♥ ${lives}`, width - 120, 34);
 
+        if (endlessMode) {
+          roundedRect(width / 2 - 92, 59, 184, 28, 13, "#102955bb");
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "center";
+          ctx.font = "800 14px sans-serif";
+          ctx.fillText(`⭐ ${endlessScore}　⚡ ${speedMultiplier().toFixed(2)}倍`, width / 2, 73);
+          ctx.textAlign = "start";
+        }
+
         if (boss) {
           const barWidth = Math.min(width * 0.68, 330);
           const barX = (width - barWidth) / 2;
-          roundedRect(barX, 64, barWidth, 17, 9, "#0d204d");
+          const barY = endlessMode ? 94 : 64;
+          roundedRect(barX, barY, barWidth, 17, 9, "#0d204d");
           let ratio;
           if (boss.kind === "ufo") {
             ratio = boss.hp / boss.maxHp;
@@ -798,7 +870,7 @@
               ? (boss.armHp[0] + boss.armHp[1]) / 4
               : boss.headHp / 3;
           }
-          roundedRect(barX + 3, 67, Math.max(0, (barWidth - 6) * ratio), 11, 6, "#ffdf5b");
+          roundedRect(barX + 3, barY + 3, Math.max(0, (barWidth - 6) * ratio), 11, 6, "#ffdf5b");
         }
 
         ctx.textAlign = "center";
